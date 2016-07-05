@@ -90,3 +90,6 @@ ENV/
 
 #Database
 *.db
+
+#KEYS
+fcm_api_key

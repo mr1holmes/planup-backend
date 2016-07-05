@@ -9,9 +9,15 @@ from sqlite3 import dbapi2 as sqlite3
 from flask import Flask,make_response,g,request
 from flask.ext.sqlalchemy import SQLAlchemy
 from sqlalchemy.exc import IntegrityError
+from pyfcm import FCMNotification
 import os,json
 
 app = Flask(__name__)
+
+with open('fcm_api_key','r') as fcm_api_key:
+    fcm_key = fcm_api_key.read()
+# firebase cloud messaging service to notify users
+push_service = FCMNotification(api_key=fcm_key)
 
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config.update(dict(
@@ -26,7 +32,7 @@ app.config.update(dict(
 
 db = SQLAlchemy(app)
 
-from models import User,Group,user_group
+from models import User,Group
 
 db.create_all()
 db.session.commit()
@@ -85,18 +91,16 @@ def user_groups(user_id):
     resp["data"]=group_list
     return make_response(json.dumps(resp)),200
 
-@app.route('/groups/<id>',methods=['GET','PUT','DELETE'])
-@app.route('/groups',methods=['POST'],defaults={'id':None})
-def groups(id):
-    resp={}
-    resp_code = 200
+@app.route('/groups/<group_id>',methods=['GET','PUT','DELETE'])
+@app.route('/groups',methods=['POST'],defaults={'group_id':None})
+def groups(group_id):
     if request.method == 'GET':
-        group = Group.query.filter_by(group_id=id).first()
+        group = Group.query.filter_by(group_id=group_id).first()
         if group is not None:
             data = {'group_id':group.group_id,
-                'group_name':group.group_name,
-                'member_count':group.count,
-                'type':'group'}
+                    'group_name':group.group_name,
+                    'member_count':group.count,
+                    'type':'group'}
             usr_list = []
             for usr in group.users:
                 usr_dict = {'user_id':usr.user_id,
@@ -114,15 +118,25 @@ def groups(id):
             db.session.commit()
         except IntegrityError:
             pass
-        resp['name'] = group.group_name
-        resp['id'] = group.group_id
+        registration_ids = []
         for usr in usr_list:
             mUser = User.query.filter_by(
                     user_id=usr['user_id']).first()
             mUser.user_group.append(group)
+            registration_ids.append(mUser.fcm_token)
         db.session.commit()
-    elif request.method == 'DELETE':
-        Group.delete.filter_by(group_id=id)
-        resp['message']='deleted successfully'
+        resp = {'data':{
+            'type':'group',
+            'id':group.group_id}}
+        resp_code = 201
+        # notify users
+        message_title = "PlanUp"
+        message_body = "You've been added to "+group.group_name
+        # result = push_service.notify_multiple_devices(registration_ids=registration_ids,
+                # message_title=message_title, message_body=message_body)
 
+    elif request.method == 'DELETE':
+        Group.delete.filter_by(group_id=group_id)
+        resp = {"data":""}
+        resp_code = 200
     return create_response(resp,resp_code)
